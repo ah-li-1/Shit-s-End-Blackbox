@@ -37,45 +37,37 @@ jobs:
 
       # 4. 安装 Android SDK
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
-          Write-Host "ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT"
-
-          $sdk = $env:ANDROID_HOME
-
-          if (!$sdk) {
-            $sdk = $env:ANDROID_SDK_ROOT
-          }
-
-          if (!$sdk -or !(Test-Path $sdk)) {
-            throw "Android SDK not found"
-          }
+          $sdk = "C:\Android\android-sdk"
 
           $sdkmanager = Get-ChildItem `
             "$sdk\cmdline-tools" `
             -Filter sdkmanager.bat `
-            -Recurse |
+            -Recurse `
+            -ErrorAction SilentlyContinue |
             Select-Object -First 1
 
           if (!$sdkmanager) {
-            throw "sdkmanager.bat not found"
+            throw "SDK command-line tools not found"
           }
 
-          & $sdkmanager.FullName --install `
+          "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
+          "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+
+          $env:ANDROID_HOME = $sdk
+          $env:ANDROID_SDK_ROOT = $sdk
+
+          & $sdkmanager.FullName --sdk_root="$sdk" --install `
             "platform-tools" `
             "platforms;android-36" `
             "build-tools;36.0.0"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "SDK installation failed"
+            throw "Android SDK installation failed"
           }
-
 
       # 5. 下载 Kotlin 2.1.0 编译器
       - name: Install Kotlin Compiler
