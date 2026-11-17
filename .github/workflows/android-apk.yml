@@ -37,7 +37,29 @@ jobs:
 
       # 4. 安装 Android SDK
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $sdk = "C:\Android\android-sdk"
+
+          if (!(Test-Path "$sdk\cmdline-tools")) {
+            throw "Android SDK command line tools not found"
+          }
+
+          "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
+          "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+
+          $sdkmanager = "$sdk\cmdline-tools\16.0\bin\sdkmanager.bat"
+
+          & $sdkmanager --install `
+            "platform-tools" `
+            "platforms;android-36" `
+            "build-tools;36.0.0"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android SDK installation failed"
+          }
 
       - name: Install Android SDK packages
         shell: pwsh
