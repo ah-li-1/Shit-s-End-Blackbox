@@ -1,37 +1,168 @@
-name: Android CI
+
+name: Build Shitsend Blackbox APK
 
 on:
   push:
-    branches: [ "shit" ]
-  pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+
+    env:
+      BUILD_WORKSPACE: ${{ runner.temp }}\blackbox-workspace
 
     steps:
+      # 1. 获取项目源码
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Setup JDK
-        uses: actions/setup-java@v6
+      # 2. 安装 JDK 21
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: '21'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+      # 3. 安装 Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Build APK
+      # 4. 安装 Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: pwsh
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          $ErrorActionPreference = "Stop"
 
-      - name: Upload APK
+          $sdk = Join-Path $env:BUILD_WORKSPACE "out/sdk"
+
+          New-Item -ItemType Directory -Force -Path $sdk | Out-Null
+
+          sdkmanager "--sdk_root=$sdk" `
+            "platforms;android-36" `
+            "build-tools;36.0.0" `
+            "platform-tools"
+
+      # 5. 下载 Kotlin 2.1.0 编译器
+      - name: Install Kotlin Compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tools = Join-Path $env:BUILD_WORKSPACE "out/tools"
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+
+          $zip = Join-Path $env:RUNNER_TEMP "kotlin.zip"
+
+          Invoke-WebRequest `
+            "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip" `
+            -OutFile $zip
+
+          Expand-Archive -Path $zip -DestinationPath $tools -Force
+
+      # 6. 下载 Shizuku 13.1.5
+      - name: Install Shizuku Libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $base = "https://repo.maven.apache.org/maven2/dev/rikka/shizuku"
+
+          $names = @("api", "aidl", "provider")
+
+          $dir = Join-Path $env:BUILD_WORKSPACE "out/shizuku"
+
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          foreach ($name in $names) {
+
+            $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+            $extract = Join-Path $env:RUNNER_TEMP "$name-aar"
+
+            $url = "$base/$name/13.1.5/$name-13.1.5.aar"
+
+            Invoke-WebRequest $url -OutFile $zip
+
+            if (Test-Path $extract) {
+              Remove-Item $extract -Recurse -Force
+            }
+
+            Expand-Archive -Path $zip -DestinationPath $extract -Force
+
+            Copy-Item `
+              "$extract/classes.jar" `
+              (Join-Path $dir "$name-13.1.5-classes.jar")
+          }
+
+      # 7. 下载 apksig
+      - name: Install APK Signature Library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dir = Join-Path $env:BUILD_WORKSPACE "out/libs"
+
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          Invoke-WebRequest `
+            "https://dl.google.com/dl/android/maven2/com/android/tools/build/apksig/8.7.3/apksig-8.7.3.jar" `
+            -OutFile (Join-Path $dir "apksig-8.7.3.jar")
+
+      # 8. 检查构建环境
+      - name: Verify Build Environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          java -version
+          python --version
+
+          $ws = $env:BUILD_WORKSPACE
+
+          $required = @(
+            "$ws/out/sdk/platforms/android-36/android.jar",
+            "$ws/out/sdk/build-tools/36.0.0/aapt2.exe",
+            "$ws/out/tools/kotlinc/bin/kotlinc.bat",
+            "$ws/out/tools/kotlinc/lib/kotlin-stdlib.jar",
+            "$ws/out/shizuku/api-13.1.5-classes.jar",
+            "$ws/out/shizuku/aidl-13.1.5-classes.jar",
+            "$ws/out/shizuku/provider-13.1.5-classes.jar",
+            "$ws/out/libs/apksig-8.7.3.jar"
+          )
+
+          foreach ($file in $required) {
+            if (!(Test-Path $file)) {
+              throw "Missing build dependency: $file"
+            }
+          }
+
+      # 9. 执行原项目构建脚本
+      - name: Build Debug APK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          python build.py
+
+          if (!(Test-Path "dist/shitsendblackbox-debug.apk")) {
+            throw "APK build failed: output APK not found"
+          }
+
+      # 10. 上传 APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Android-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: Shitsend-Blackbox-Debug-APK
+          path: dist/shitsendblackbox-debug.apk
           if-no-files-found: error
+          retention-days: 14
