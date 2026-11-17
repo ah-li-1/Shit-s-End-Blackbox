@@ -37,41 +37,45 @@ jobs:
 
       # 4. 安装 Android SDK
       - name: Setup Android SDK
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $sdk = "C:\Android\android-sdk"
-
-          if (!(Test-Path "$sdk\cmdline-tools")) {
-            throw "Android SDK command line tools not found"
-          }
-
-          "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
-          "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
-
-          $sdkmanager = "$sdk\cmdline-tools\16.0\bin\sdkmanager.bat"
-
-          & $sdkmanager --install `
-            "platform-tools" `
-            "platforms;android-36" `
-            "build-tools;36.0.0"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Android SDK installation failed"
-          }
+        uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-      
-          sdkmanager --install `
+
+          Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
+          Write-Host "ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT"
+
+          $sdk = $env:ANDROID_HOME
+
+          if (!$sdk) {
+            $sdk = $env:ANDROID_SDK_ROOT
+          }
+
+          if (!$sdk -or !(Test-Path $sdk)) {
+            throw "Android SDK not found"
+          }
+
+          $sdkmanager = Get-ChildItem `
+            "$sdk\cmdline-tools" `
+            -Filter sdkmanager.bat `
+            -Recurse |
+            Select-Object -First 1
+
+          if (!$sdkmanager) {
+            throw "sdkmanager.bat not found"
+          }
+
+          & $sdkmanager.FullName --install `
             "platform-tools" `
             "platforms;android-36" `
             "build-tools;36.0.0"
-      
-          sdkmanager --licenses
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "SDK installation failed"
+          }
+
 
       # 5. 下载 Kotlin 2.1.0 编译器
       - name: Install Kotlin Compiler
