@@ -10,7 +10,10 @@ import os, sys, shutil, subprocess, zipfile, glob, time
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(ROOT, "app")
-WS = r"C:\Users\33558\Documents\deepseek-harness\default-workspace"
+WS = os.environ.get(
+    "BUILD_WORKSPACE",
+    os.path.join(ROOT, ".ci-workspace")
+)
 # aapt2 在本机无法写入 Desktop 下的目录（ERROR_INVALID_DATA），构建目录放到工作区
 BUILD = os.path.join(WS, "out", "bbbuild")
 SDK = os.path.join(WS, "out", "sdk")
@@ -20,7 +23,7 @@ KOTLINC = os.path.join(WS, "out", "tools", "kotlinc", "bin", "kotlinc.bat")
 KOTLIN_STDLIB = os.path.join(WS, "out", "tools", "kotlinc", "lib", "kotlin-stdlib.jar")
 SHIZUKU = os.path.join(WS, "out", "shizuku")
 APKSIG = os.path.join(WS, "out", "libs", "apksig-8.7.3.jar")
-JDK = r"C:\Program Files\Java\jdk-21.0.12"
+JDK = os.environ.get("JAVA_HOME", r"C:\Program Files\Java\jdk-21.0.12")
 JAVA = os.path.join(JDK, "bin", "java.exe")
 KEYTOOL = os.path.join(JDK, "bin", "keytool.exe")
 KEYSTORE = os.path.join(APP, "keystore", "blackbox.jks")
