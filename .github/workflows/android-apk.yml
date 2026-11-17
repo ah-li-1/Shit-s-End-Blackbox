@@ -43,15 +43,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          $sdk = Join-Path $env:BUILD_WORKSPACE "out/sdk"
-
-          New-Item -ItemType Directory -Force -Path $sdk | Out-Null
-
-          sdkmanager "--sdk_root=$sdk" `
+      
+          sdkmanager --install `
+            "platform-tools" `
             "platforms;android-36" `
-            "build-tools;36.0.0" `
-            "platform-tools"
+            "build-tools;36.0.0"
+      
+          sdkmanager --licenses
 
       # 5. 下载 Kotlin 2.1.0 编译器
       - name: Install Kotlin Compiler
