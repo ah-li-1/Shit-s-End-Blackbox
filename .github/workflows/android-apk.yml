@@ -18,41 +18,45 @@ jobs:
       BUILD_WORKSPACE: ${{ github.workspace }}\.ci-workspace
 
     steps:
-      # 1. 获取项目源码
+      # 1. 获取源码
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 安装 JDK 21
+      # 2. JDK 21
       - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      # 3. 安装 Python
+      # 3. Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # 4. 安装 Android SDK
-      - name: Setup Android SDK
+      # 4. 安装 Android SDK 到统一目录
+      - name: Install Android SDK
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $sdk = "C:\Android\android-sdk"
+          $sdk = Join-Path $env:BUILD_WORKSPACE "out\sdk"
 
-          $sdkmanager = Get-ChildItem `
-            "$sdk\cmdline-tools" `
+          New-Item -ItemType Directory -Force -Path $sdk | Out-Null
+
+          $manager = Get-ChildItem `
+            "C:\Android\android-sdk\cmdline-tools" `
             -Filter sdkmanager.bat `
-            -Recurse `
-            -ErrorAction SilentlyContinue |
+            -Recurse |
             Select-Object -First 1
 
-          if (!$sdkmanager) {
-            throw "SDK command-line tools not found"
+          if (!$manager) {
+            throw "SDK Manager not found on Windows Runner"
           }
+
+          Write-Host "SDK Manager: $($manager.FullName)"
+          Write-Host "Target SDK: $sdk"
 
           "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
           "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
@@ -60,7 +64,7 @@ jobs:
           $env:ANDROID_HOME = $sdk
           $env:ANDROID_SDK_ROOT = $sdk
 
-          & $sdkmanager.FullName --sdk_root="$sdk" --install `
+          & $manager.FullName "--sdk_root=$sdk" --install `
             "platform-tools" `
             "platforms;android-36" `
             "build-tools;36.0.0"
@@ -69,13 +73,22 @@ jobs:
             throw "Android SDK installation failed"
           }
 
-      # 5. 下载 Kotlin 2.1.0 编译器
+          $licenseInput = (1..30 | ForEach-Object { "y" }) -join "`n"
+
+          $licenseInput | & $manager.FullName "--sdk_root=$sdk" --licenses
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android SDK license acceptance failed"
+          }
+
+      # 5. Kotlin 2.1.0
       - name: Install Kotlin Compiler
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $tools = Join-Path $env:BUILD_WORKSPACE "out/tools"
+          $tools = Join-Path $env:BUILD_WORKSPACE "out\tools"
+
           New-Item -ItemType Directory -Force -Path $tools | Out-Null
 
           $zip = Join-Path $env:RUNNER_TEMP "kotlin.zip"
@@ -86,7 +99,11 @@ jobs:
 
           Expand-Archive -Path $zip -DestinationPath $tools -Force
 
-      # 6. 下载 Shizuku 13.1.5
+          if (!(Test-Path "$tools\kotlinc\bin\kotlinc.bat")) {
+            throw "Kotlin compiler installation failed"
+          }
+
+      # 6. Shizuku 13.1.5
       - name: Install Shizuku Libraries
         shell: pwsh
         run: |
@@ -96,12 +113,11 @@ jobs:
 
           $names = @("api", "aidl", "provider")
 
-          $dir = Join-Path $env:BUILD_WORKSPACE "out/shizuku"
+          $dir = Join-Path $env:BUILD_WORKSPACE "out\shizuku"
 
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
           foreach ($name in $names) {
-
             $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
             $extract = Join-Path $env:RUNNER_TEMP "$name-aar"
 
@@ -115,18 +131,22 @@ jobs:
 
             Expand-Archive -Path $zip -DestinationPath $extract -Force
 
-            Copy-Item `
-              "$extract/classes.jar" `
-              (Join-Path $dir "$name-13.1.5-classes.jar")
+            $jar = Join-Path $extract "classes.jar"
+
+            if (!(Test-Path $jar)) {
+              throw "Missing classes.jar for Shizuku $name"
+            }
+
+            Copy-Item $jar (Join-Path $dir "$name-13.1.5-classes.jar")
           }
 
-      # 7. 下载 apksig
+      # 7. APK Signature Library
       - name: Install APK Signature Library
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $dir = Join-Path $env:BUILD_WORKSPACE "out/libs"
+          $dir = Join-Path $env:BUILD_WORKSPACE "out\libs"
 
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
@@ -134,7 +154,7 @@ jobs:
             "https://dl.google.com/dl/android/maven2/com/android/tools/build/apksig/8.7.3/apksig-8.7.3.jar" `
             -OutFile (Join-Path $dir "apksig-8.7.3.jar")
 
-      # 8. 检查构建环境
+      # 8. 检查所有依赖
       - name: Verify Build Environment
         shell: pwsh
         run: |
@@ -146,23 +166,28 @@ jobs:
           $ws = $env:BUILD_WORKSPACE
 
           $required = @(
-            "$ws/out/sdk/platforms/android-36/android.jar",
-            "$ws/out/sdk/build-tools/36.0.0/aapt2.exe",
-            "$ws/out/tools/kotlinc/bin/kotlinc.bat",
-            "$ws/out/tools/kotlinc/lib/kotlin-stdlib.jar",
-            "$ws/out/shizuku/api-13.1.5-classes.jar",
-            "$ws/out/shizuku/aidl-13.1.5-classes.jar",
-            "$ws/out/shizuku/provider-13.1.5-classes.jar",
-            "$ws/out/libs/apksig-8.7.3.jar"
+            "$ws\out\sdk\platforms\android-36\android.jar",
+            "$ws\out\sdk\build-tools\36.0.0\aapt2.exe",
+            "$ws\out\sdk\build-tools\36.0.0\d8.bat",
+            "$ws\out\sdk\build-tools\36.0.0\apksigner.bat",
+            "$ws\out\sdk\build-tools\36.0.0\zipalign.exe",
+            "$ws\out\tools\kotlinc\bin\kotlinc.bat",
+            "$ws\out\tools\kotlinc\lib\kotlin-stdlib.jar",
+            "$ws\out\shizuku\api-13.1.5-classes.jar",
+            "$ws\out\shizuku\aidl-13.1.5-classes.jar",
+            "$ws\out\shizuku\provider-13.1.5-classes.jar",
+            "$ws\out\libs\apksig-8.7.3.jar"
           )
 
           foreach ($file in $required) {
             if (!(Test-Path $file)) {
               throw "Missing build dependency: $file"
             }
+
+            Write-Host "OK: $file"
           }
 
-      # 9. 执行原项目构建脚本
+      # 9. 构建 APK
       - name: Build Debug APK
         shell: pwsh
         run: |
@@ -170,9 +195,18 @@ jobs:
 
           python build.py
 
-          if (!(Test-Path "dist/shitsendblackbox-debug.apk")) {
-            throw "APK build failed: output APK not found"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Python build failed"
           }
+
+          $apk = "dist\shitsendblackbox-debug.apk"
+
+          if (!(Test-Path $apk)) {
+            throw "APK output not found"
+          }
+
+          Write-Host "APK generated successfully"
+          Get-Item $apk | Format-List Name, Length, FullName
 
       # 10. 上传 APK
       - name: Upload Debug APK
