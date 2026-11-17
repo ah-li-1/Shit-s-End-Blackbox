@@ -45,6 +45,7 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $sdk | Out-Null
 
+          # 查找 Runner 自带的 SDK Manager
           $manager = Get-ChildItem `
             "C:\Android\android-sdk\cmdline-tools" `
             -Filter sdkmanager.bat `
@@ -52,34 +53,52 @@ jobs:
             Select-Object -First 1
 
           if (!$manager) {
-            throw "SDK Manager not found on Windows Runner"
+            throw "SDK Manager not found"
           }
 
           Write-Host "SDK Manager: $($manager.FullName)"
-          Write-Host "Target SDK: $sdk"
+          Write-Host "Installing SDK into: $sdk"
 
+          # 设置统一 SDK 路径
           "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
           "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
 
-          $env:ANDROID_HOME = $sdk
-          $env:ANDROID_SDK_ROOT = $sdk
+          # 接受 Android SDK 许可证
+          1..30 | ForEach-Object { "y" } |
+            & $manager.FullName "--sdk_root=$sdk" --licenses
 
+          if ($LASTEXITCODE -ne 0) {
+            throw "SDK license acceptance failed"
+          }
+
+          # 安装 Android 36
           & $manager.FullName "--sdk_root=$sdk" --install `
-            "platform-tools" `
             "platforms;android-36" `
+            "platform-tools" `
             "build-tools;36.0.0"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Android SDK installation failed"
+            throw "SDK package installation failed"
           }
 
-          $licenseInput = (1..30 | ForEach-Object { "y" }) -join "`n"
+          # 立即检查安装结果
+          $required = @(
+            "$sdk\platforms\android-36\android.jar",
+            "$sdk\build-tools\36.0.0\aapt2.exe",
+            "$sdk\build-tools\36.0.0\d8.bat",
+            "$sdk\build-tools\36.0.0\apksigner.bat"
+          )
 
-          $licenseInput | & $manager.FullName "--sdk_root=$sdk" --licenses
+          foreach ($file in $required) {
+            if (!(Test-Path $file)) {
+              Write-Host "Missing: $file"
+              throw "Android SDK installation incomplete"
+            }
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Android SDK license acceptance failed"
+            Write-Host "Installed: $file"
           }
+
+          Write-Host "Android SDK installation successful!"
 
       # 5. Kotlin 2.1.0
       - name: Install Kotlin Compiler
